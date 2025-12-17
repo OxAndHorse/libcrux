@@ -320,6 +320,47 @@ unsafe fn encapsulate_avx2<
     >(public_key, randomness)
 }
 
+//tag
+#[allow(unsafe_code)]
+unsafe fn encapsulate_with_tag_avx2<
+    const K: usize,
+    const CIPHERTEXT_SIZE: usize,
+    const PUBLIC_KEY_SIZE: usize,
+    const T_AS_NTT_ENCODED_SIZE: usize,
+    const C1_SIZE: usize,
+    const C2_SIZE: usize,
+    const VECTOR_U_COMPRESSION_FACTOR: usize,
+    const VECTOR_V_COMPRESSION_FACTOR: usize,
+    const VECTOR_U_BLOCK_LEN: usize,
+    const ETA1: usize,
+    const ETA1_RANDOMNESS_SIZE: usize,
+    const ETA2: usize,
+    const ETA2_RANDOMNESS_SIZE: usize,
+>(
+    public_key: &MlKemPublicKey<PUBLIC_KEY_SIZE>,
+    randomness: &[u8; SHARED_SECRET_SIZE],
+    tag :&[u8],
+) -> (MlKemCiphertext<CIPHERTEXT_SIZE>, MlKemSharedSecret) {
+    crate::ind_cca::encapsulate_with_tag::<
+        K,
+        CIPHERTEXT_SIZE,
+        PUBLIC_KEY_SIZE,
+        T_AS_NTT_ENCODED_SIZE,
+        C1_SIZE,
+        C2_SIZE,
+        VECTOR_U_COMPRESSION_FACTOR,
+        VECTOR_V_COMPRESSION_FACTOR,
+        VECTOR_U_BLOCK_LEN,
+        ETA1,
+        ETA1_RANDOMNESS_SIZE,
+        ETA2,
+        ETA2_RANDOMNESS_SIZE,
+        crate::vector::SIMD256Vector,
+        crate::hash_functions::avx2::Simd256Hash,
+        crate::variant::MlKem,
+    >(public_key, randomness,tag)
+}
+
 #[allow(unsafe_code)]
 #[hax_lib::requires(fstar!(r#"Spec.MLKEM.is_rank $K /\
     $CIPHERTEXT_SIZE == Spec.MLKEM.v_CPA_CIPHERTEXT_SIZE $K /\
@@ -368,6 +409,46 @@ pub(crate) fn encapsulate<
             ETA2,
             ETA2_RANDOMNESS_SIZE,
         >(public_key, randomness)
+    }
+}
+
+#[allow(unsafe_code)]
+//tag
+pub(crate) fn encapsulate_with_tag<
+    const K: usize,
+    const CIPHERTEXT_SIZE: usize,
+    const PUBLIC_KEY_SIZE: usize,
+    const T_AS_NTT_ENCODED_SIZE: usize,
+    const C1_SIZE: usize,
+    const C2_SIZE: usize,
+    const VECTOR_U_COMPRESSION_FACTOR: usize,
+    const VECTOR_V_COMPRESSION_FACTOR: usize,
+    const VECTOR_U_BLOCK_LEN: usize,
+    const ETA1: usize,
+    const ETA1_RANDOMNESS_SIZE: usize,
+    const ETA2: usize,
+    const ETA2_RANDOMNESS_SIZE: usize,
+>(
+    public_key: &MlKemPublicKey<PUBLIC_KEY_SIZE>,
+    randomness: &[u8; SHARED_SECRET_SIZE],
+    tag: &[u8],
+) -> (MlKemCiphertext<CIPHERTEXT_SIZE>, MlKemSharedSecret) {
+    unsafe {
+        encapsulate_with_tag_avx2::<
+            K,
+            CIPHERTEXT_SIZE,
+            PUBLIC_KEY_SIZE,
+            T_AS_NTT_ENCODED_SIZE,
+            C1_SIZE,
+            C2_SIZE,
+            VECTOR_U_COMPRESSION_FACTOR,
+            VECTOR_V_COMPRESSION_FACTOR,
+            VECTOR_U_BLOCK_LEN,
+            ETA1,
+            ETA1_RANDOMNESS_SIZE,
+            ETA2,
+            ETA2_RANDOMNESS_SIZE,
+        >(public_key, randomness, tag)
     }
 }
 
@@ -526,6 +607,52 @@ unsafe fn decapsulate_avx2<
 }
 
 #[allow(unsafe_code)]
+unsafe fn decapsulate_with_tag_avx2<
+    const K: usize,
+    const SECRET_KEY_SIZE: usize,
+    const CPA_SECRET_KEY_SIZE: usize,
+    const PUBLIC_KEY_SIZE: usize,
+    const CIPHERTEXT_SIZE: usize,
+    const T_AS_NTT_ENCODED_SIZE: usize,
+    const C1_SIZE: usize,
+    const C2_SIZE: usize,
+    const VECTOR_U_COMPRESSION_FACTOR: usize,
+    const VECTOR_V_COMPRESSION_FACTOR: usize,
+    const C1_BLOCK_SIZE: usize,
+    const ETA1: usize,
+    const ETA1_RANDOMNESS_SIZE: usize,
+    const ETA2: usize,
+    const ETA2_RANDOMNESS_SIZE: usize,
+    const IMPLICIT_REJECTION_HASH_INPUT_SIZE: usize,
+>(
+    private_key: &MlKemPrivateKey<SECRET_KEY_SIZE>,
+    ciphertext: &MlKemCiphertext<CIPHERTEXT_SIZE>,
+    tag: &[u8],
+) -> MlKemSharedSecret {
+    crate::ind_cca::decapsulate_with_tag::<
+        K,
+        SECRET_KEY_SIZE,
+        CPA_SECRET_KEY_SIZE,
+        PUBLIC_KEY_SIZE,
+        CIPHERTEXT_SIZE,
+        T_AS_NTT_ENCODED_SIZE,
+        C1_SIZE,
+        C2_SIZE,
+        VECTOR_U_COMPRESSION_FACTOR,
+        VECTOR_V_COMPRESSION_FACTOR,
+        C1_BLOCK_SIZE,
+        ETA1,
+        ETA1_RANDOMNESS_SIZE,
+        ETA2,
+        ETA2_RANDOMNESS_SIZE,
+        IMPLICIT_REJECTION_HASH_INPUT_SIZE,
+        crate::vector::SIMD256Vector,
+        crate::hash_functions::avx2::Simd256Hash,
+        crate::variant::MlKem,
+    >(private_key, ciphertext,tag)
+}
+
+#[allow(unsafe_code)]
 #[hax_lib::requires(fstar!(r#"Spec.MLKEM.is_rank $K /\
     $SECRET_KEY_SIZE == Spec.MLKEM.v_CCA_PRIVATE_KEY_SIZE $K /\
     $CPA_SECRET_KEY_SIZE == Spec.MLKEM.v_CPA_PRIVATE_KEY_SIZE $K /\
@@ -584,6 +711,52 @@ pub fn decapsulate<
         >(private_key, ciphertext)
     }
 }
+
+#[allow(unsafe_code)]
+pub fn decapsulate_with_tag<
+    const K: usize,
+    const SECRET_KEY_SIZE: usize,
+    const CPA_SECRET_KEY_SIZE: usize,
+    const PUBLIC_KEY_SIZE: usize,
+    const CIPHERTEXT_SIZE: usize,
+    const T_AS_NTT_ENCODED_SIZE: usize,
+    const C1_SIZE: usize,
+    const C2_SIZE: usize,
+    const VECTOR_U_COMPRESSION_FACTOR: usize,
+    const VECTOR_V_COMPRESSION_FACTOR: usize,
+    const C1_BLOCK_SIZE: usize,
+    const ETA1: usize,
+    const ETA1_RANDOMNESS_SIZE: usize,
+    const ETA2: usize,
+    const ETA2_RANDOMNESS_SIZE: usize,
+    const IMPLICIT_REJECTION_HASH_INPUT_SIZE: usize,
+>(
+    private_key: &MlKemPrivateKey<SECRET_KEY_SIZE>,
+    ciphertext: &MlKemCiphertext<CIPHERTEXT_SIZE>,
+    tag :&[u8],
+) -> MlKemSharedSecret {
+    unsafe {
+        decapsulate_with_tag_avx2::<
+            K,
+            SECRET_KEY_SIZE,
+            CPA_SECRET_KEY_SIZE,
+            PUBLIC_KEY_SIZE,
+            CIPHERTEXT_SIZE,
+            T_AS_NTT_ENCODED_SIZE,
+            C1_SIZE,
+            C2_SIZE,
+            VECTOR_U_COMPRESSION_FACTOR,
+            VECTOR_V_COMPRESSION_FACTOR,
+            C1_BLOCK_SIZE,
+            ETA1,
+            ETA1_RANDOMNESS_SIZE,
+            ETA2,
+            ETA2_RANDOMNESS_SIZE,
+            IMPLICIT_REJECTION_HASH_INPUT_SIZE,
+        >(private_key, ciphertext,tag)
+    }
+}
+
 
 /// Unpacked API
 pub(crate) mod unpacked {
@@ -779,6 +952,45 @@ pub(crate) mod unpacked {
         >(public_key, randomness)
     }
 
+    #[allow(unsafe_code)]
+    unsafe fn encapsulate_with_tag_avx2<
+        const K: usize,
+        const CIPHERTEXT_SIZE: usize,
+        const PUBLIC_KEY_SIZE: usize,
+        const T_AS_NTT_ENCODED_SIZE: usize,
+        const C1_SIZE: usize,
+        const C2_SIZE: usize,
+        const VECTOR_U_COMPRESSION_FACTOR: usize,
+        const VECTOR_V_COMPRESSION_FACTOR: usize,
+        const VECTOR_U_BLOCK_LEN: usize,
+        const ETA1: usize,
+        const ETA1_RANDOMNESS_SIZE: usize,
+        const ETA2: usize,
+        const ETA2_RANDOMNESS_SIZE: usize,
+    >(
+        public_key: &MlKemPublicKeyUnpacked<K>,
+        randomness: &[u8; SHARED_SECRET_SIZE],
+        tag :&[u8],
+    ) -> (MlKemCiphertext<CIPHERTEXT_SIZE>, MlKemSharedSecret) {
+        crate::ind_cca::unpacked::encapsulate_with_tag::<
+            K,
+            CIPHERTEXT_SIZE,
+            PUBLIC_KEY_SIZE,
+            T_AS_NTT_ENCODED_SIZE,
+            C1_SIZE,
+            C2_SIZE,
+            VECTOR_U_COMPRESSION_FACTOR,
+            VECTOR_V_COMPRESSION_FACTOR,
+            VECTOR_U_BLOCK_LEN,
+            ETA1,
+            ETA1_RANDOMNESS_SIZE,
+            ETA2,
+            ETA2_RANDOMNESS_SIZE,
+            crate::vector::SIMD256Vector,
+            crate::hash_functions::avx2::Simd256Hash,
+        >(public_key, randomness,tag)
+    }
+
     /// Unpacked encapsulate
     #[allow(unsafe_code)]
     #[hax_lib::requires(fstar!(r#"Spec.MLKEM.is_rank $K /\
@@ -828,6 +1040,47 @@ pub(crate) mod unpacked {
             >(public_key, randomness)
         }
     }
+
+
+    #[allow(unsafe_code)]
+    pub(crate) fn encapsulate_with_tag<
+        const K: usize,
+        const CIPHERTEXT_SIZE: usize,
+        const PUBLIC_KEY_SIZE: usize,
+        const T_AS_NTT_ENCODED_SIZE: usize,
+        const C1_SIZE: usize,
+        const C2_SIZE: usize,
+        const VECTOR_U_COMPRESSION_FACTOR: usize,
+        const VECTOR_V_COMPRESSION_FACTOR: usize,
+        const VECTOR_U_BLOCK_LEN: usize,
+        const ETA1: usize,
+        const ETA1_RANDOMNESS_SIZE: usize,
+        const ETA2: usize,
+        const ETA2_RANDOMNESS_SIZE: usize,
+    >(
+        public_key: &MlKemPublicKeyUnpacked<K>,
+        randomness: &[u8; SHARED_SECRET_SIZE],
+        tag :&[u8],
+    ) -> (MlKemCiphertext<CIPHERTEXT_SIZE>, MlKemSharedSecret) {
+        unsafe {
+            encapsulate_with_tag_avx2::<
+                K,
+                CIPHERTEXT_SIZE,
+                PUBLIC_KEY_SIZE,
+                T_AS_NTT_ENCODED_SIZE,
+                C1_SIZE,
+                C2_SIZE,
+                VECTOR_U_COMPRESSION_FACTOR,
+                VECTOR_V_COMPRESSION_FACTOR,
+                VECTOR_U_BLOCK_LEN,
+                ETA1,
+                ETA1_RANDOMNESS_SIZE,
+                ETA2,
+                ETA2_RANDOMNESS_SIZE,
+            >(public_key, randomness,tag)
+        }
+    }
+
 
     #[cfg_attr(not(hax), target_feature(enable = "avx2"))]
     #[allow(unsafe_code)]
@@ -886,6 +1139,64 @@ pub(crate) mod unpacked {
         >(key_pair, ciphertext)
     }
 
+    #[cfg_attr(not(hax), target_feature(enable = "avx2"))]
+    #[allow(unsafe_code)]
+    #[hax_lib::requires(fstar!(r#"Spec.MLKEM.is_rank $K /\
+        $ETA1 == Spec.MLKEM.v_ETA1 $K /\
+        $ETA1_RANDOMNESS_SIZE == Spec.MLKEM.v_ETA1_RANDOMNESS_SIZE $K /\
+        $ETA2 == Spec.MLKEM.v_ETA2 $K /\
+        $ETA2_RANDOMNESS_SIZE == Spec.MLKEM.v_ETA2_RANDOMNESS_SIZE $K /\
+        $C1_SIZE == Spec.MLKEM.v_C1_SIZE $K /\
+        $C2_SIZE == Spec.MLKEM.v_C2_SIZE $K /\
+        $VECTOR_U_COMPRESSION_FACTOR == Spec.MLKEM.v_VECTOR_U_COMPRESSION_FACTOR $K /\
+        $VECTOR_V_COMPRESSION_FACTOR == Spec.MLKEM.v_VECTOR_V_COMPRESSION_FACTOR $K /\
+        $C1_BLOCK_SIZE == Spec.MLKEM.v_C1_BLOCK_SIZE $K /\
+        $CIPHERTEXT_SIZE == Spec.MLKEM.v_CPA_CIPHERTEXT_SIZE $K /\
+        $IMPLICIT_REJECTION_HASH_INPUT_SIZE == Spec.MLKEM.v_IMPLICIT_REJECTION_HASH_INPUT_SIZE $K"#))]
+    unsafe fn decapsulate_with_tag_avx2<
+        const K: usize,
+        const SECRET_KEY_SIZE: usize,
+        const CPA_SECRET_KEY_SIZE: usize,
+        const PUBLIC_KEY_SIZE: usize,
+        const CIPHERTEXT_SIZE: usize,
+        const T_AS_NTT_ENCODED_SIZE: usize,
+        const C1_SIZE: usize,
+        const C2_SIZE: usize,
+        const VECTOR_U_COMPRESSION_FACTOR: usize,
+        const VECTOR_V_COMPRESSION_FACTOR: usize,
+        const C1_BLOCK_SIZE: usize,
+        const ETA1: usize,
+        const ETA1_RANDOMNESS_SIZE: usize,
+        const ETA2: usize,
+        const ETA2_RANDOMNESS_SIZE: usize,
+        const IMPLICIT_REJECTION_HASH_INPUT_SIZE: usize,
+    >(
+        key_pair: &MlKemKeyPairUnpacked<K>,
+        ciphertext: &MlKemCiphertext<CIPHERTEXT_SIZE>,
+        tag:&[u8],
+    ) -> MlKemSharedSecret {
+        crate::ind_cca::unpacked::decapsulate_with_tag::<
+            K,
+            SECRET_KEY_SIZE,
+            CPA_SECRET_KEY_SIZE,
+            PUBLIC_KEY_SIZE,
+            CIPHERTEXT_SIZE,
+            T_AS_NTT_ENCODED_SIZE,
+            C1_SIZE,
+            C2_SIZE,
+            VECTOR_U_COMPRESSION_FACTOR,
+            VECTOR_V_COMPRESSION_FACTOR,
+            C1_BLOCK_SIZE,
+            ETA1,
+            ETA1_RANDOMNESS_SIZE,
+            ETA2,
+            ETA2_RANDOMNESS_SIZE,
+            IMPLICIT_REJECTION_HASH_INPUT_SIZE,
+            crate::vector::SIMD256Vector,
+            crate::hash_functions::avx2::Simd256Hash,
+        >(key_pair, ciphertext,tag)
+    }
+
     /// Unpacked decapsulate
     #[allow(unsafe_code)]
     #[hax_lib::requires(fstar!(r#"Spec.MLKEM.is_rank $K /\
@@ -940,6 +1251,63 @@ pub(crate) mod unpacked {
                 ETA2_RANDOMNESS_SIZE,
                 IMPLICIT_REJECTION_HASH_INPUT_SIZE,
             >(key_pair, ciphertext)
+        }
+    }
+
+    #[allow(unsafe_code)]
+    #[hax_lib::requires(fstar!(r#"Spec.MLKEM.is_rank $K /\
+        $ETA1 == Spec.MLKEM.v_ETA1 $K /\
+        $ETA1_RANDOMNESS_SIZE == Spec.MLKEM.v_ETA1_RANDOMNESS_SIZE $K /\
+        $ETA2 == Spec.MLKEM.v_ETA2 $K /\
+        $ETA2_RANDOMNESS_SIZE == Spec.MLKEM.v_ETA2_RANDOMNESS_SIZE $K /\
+        $C1_SIZE == Spec.MLKEM.v_C1_SIZE $K /\
+        $C2_SIZE == Spec.MLKEM.v_C2_SIZE $K /\
+        $VECTOR_U_COMPRESSION_FACTOR == Spec.MLKEM.v_VECTOR_U_COMPRESSION_FACTOR $K /\
+        $VECTOR_V_COMPRESSION_FACTOR == Spec.MLKEM.v_VECTOR_V_COMPRESSION_FACTOR $K /\
+        $C1_BLOCK_SIZE == Spec.MLKEM.v_C1_BLOCK_SIZE $K /\
+        $CIPHERTEXT_SIZE == Spec.MLKEM.v_CPA_CIPHERTEXT_SIZE $K /\
+        $IMPLICIT_REJECTION_HASH_INPUT_SIZE == Spec.MLKEM.v_IMPLICIT_REJECTION_HASH_INPUT_SIZE $K"#))]
+    pub(crate) fn decapsulate_with_tag<
+        const K: usize,
+        const SECRET_KEY_SIZE: usize,
+        const CPA_SECRET_KEY_SIZE: usize,
+        const PUBLIC_KEY_SIZE: usize,
+        const CIPHERTEXT_SIZE: usize,
+        const T_AS_NTT_ENCODED_SIZE: usize,
+        const C1_SIZE: usize,
+        const C2_SIZE: usize,
+        const VECTOR_U_COMPRESSION_FACTOR: usize,
+        const VECTOR_V_COMPRESSION_FACTOR: usize,
+        const C1_BLOCK_SIZE: usize,
+        const ETA1: usize,
+        const ETA1_RANDOMNESS_SIZE: usize,
+        const ETA2: usize,
+        const ETA2_RANDOMNESS_SIZE: usize,
+        const IMPLICIT_REJECTION_HASH_INPUT_SIZE: usize,
+    >(
+        key_pair: &MlKemKeyPairUnpacked<K>,
+        ciphertext: &MlKemCiphertext<CIPHERTEXT_SIZE>,
+        tag:&[u8],
+    ) -> MlKemSharedSecret {
+        unsafe {
+            decapsulate_with_tag_avx2::<
+                K,
+                SECRET_KEY_SIZE,
+                CPA_SECRET_KEY_SIZE,
+                PUBLIC_KEY_SIZE,
+                CIPHERTEXT_SIZE,
+                T_AS_NTT_ENCODED_SIZE,
+                C1_SIZE,
+                C2_SIZE,
+                VECTOR_U_COMPRESSION_FACTOR,
+                VECTOR_V_COMPRESSION_FACTOR,
+                C1_BLOCK_SIZE,
+                ETA1,
+                ETA1_RANDOMNESS_SIZE,
+                ETA2,
+                ETA2_RANDOMNESS_SIZE,
+                IMPLICIT_REJECTION_HASH_INPUT_SIZE,
+            >(key_pair, ciphertext,tag)
         }
     }
 }

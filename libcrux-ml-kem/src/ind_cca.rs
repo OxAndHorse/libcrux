@@ -1,3 +1,5 @@
+use std::vec::Vec;
+
 use crate::{
     constant_time_ops::compare_ciphertexts_select_shared_secret_in_constant_time,
     constants::{
@@ -296,6 +298,8 @@ pub(crate) fn encapsulate<
         lemma_slice_append $to_hash $randomness (Spec.Utils.v_H ${public_key}.f_value);
         assert ($to_hash == concat $randomness (Spec.Utils.v_H ${public_key}.f_value))"
     );
+
+
     let hashed = Hasher::G(&to_hash);
     let (shared_secret, pseudorandomness) = hashed.split_at(SHARED_SECRET_SIZE);
 
@@ -320,6 +324,68 @@ pub(crate) fn encapsulate<
         MlKemCiphertext::from(ciphertext),
         Scheme::kdf::<K, CIPHERTEXT_SIZE, Hasher>(shared_secret, &ciphertext),
     )
+}
+
+#[inline(always)]
+pub(crate) fn encapsulate_with_tag<
+    const K: usize,
+    const CIPHERTEXT_SIZE: usize,
+    const PUBLIC_KEY_SIZE: usize,
+    const T_AS_NTT_ENCODED_SIZE: usize,
+    const C1_SIZE: usize,
+    const C2_SIZE: usize,
+    const VECTOR_U_COMPRESSION_FACTOR: usize,
+    const VECTOR_V_COMPRESSION_FACTOR: usize,
+    const C1_BLOCK_SIZE: usize,
+    const ETA1: usize,
+    const ETA1_RANDOMNESS_SIZE: usize,
+    const ETA2: usize,
+    const ETA2_RANDOMNESS_SIZE: usize,
+    Vector: Operations,
+    Hasher: Hash<K>,
+    Scheme: Variant,
+>(
+    public_key: &MlKemPublicKey<PUBLIC_KEY_SIZE>, 
+    randomness: &[u8; SHARED_SECRET_SIZE],
+    tag: &[u8], // <-- 新增参数
+) -> (MlKemCiphertext<CIPHERTEXT_SIZE>, MlKemSharedSecret) {
+     // Step 1: Preprocess randomness (unchanged)
+     let randomness_processed = Scheme::entropy_preprocess::<K, Hasher>(randomness);
+
+     // Step 2: Build to_hash = [ randomness || H(pk) || tag ]
+     let h_pk = Hasher::H(public_key.as_slice());
+ 
+     // Use dynamic vector since tag is variable-length
+     let mut to_hash = Vec::with_capacity(SHARED_SECRET_SIZE + H_DIGEST_SIZE + tag.len());
+     to_hash.extend_from_slice(&randomness_processed);
+     to_hash.extend_from_slice(&h_pk);
+     to_hash.extend_from_slice(tag); // <-- 关键：加入 tag
+
+     let hashed = Hasher::G(&to_hash); // Assumes G can handle variable input
+     let (shared_secret_tag, pseudorandomness_tag) = hashed.split_at(SHARED_SECRET_SIZE);
+    
+     let ciphertext = crate::ind_cpa::encrypt::<
+     K,
+     CIPHERTEXT_SIZE,
+     T_AS_NTT_ENCODED_SIZE,
+     C1_SIZE,
+     C2_SIZE,
+     VECTOR_U_COMPRESSION_FACTOR,
+     VECTOR_V_COMPRESSION_FACTOR,
+     C1_BLOCK_SIZE,
+     ETA1,
+     ETA1_RANDOMNESS_SIZE,
+     ETA2,
+     ETA2_RANDOMNESS_SIZE,
+     Vector,
+     Hasher,
+    >(public_key.as_slice(), &randomness_processed, pseudorandomness_tag);
+
+    (
+        MlKemCiphertext::from(ciphertext),
+        Scheme::kdf::<K, CIPHERTEXT_SIZE, Hasher>(shared_secret_tag, &ciphertext),
+    )
+
 }
 
 /// This code verifies on some machines, runs out of memory on others
@@ -454,6 +520,115 @@ pub(crate) fn decapsulate<
         &expected_ciphertext,
         &shared_secret,
         &implicit_rejection_shared_secret,
+    )
+}
+
+
+#[inline(always)]
+pub(crate) fn decapsulate_with_tag<
+    const K: usize,
+    const SECRET_KEY_SIZE: usize,
+    const CPA_SECRET_KEY_SIZE: usize,
+    const PUBLIC_KEY_SIZE: usize,
+    const CIPHERTEXT_SIZE: usize,
+    const T_AS_NTT_ENCODED_SIZE: usize,
+    const C1_SIZE: usize,
+    const C2_SIZE: usize,
+    const VECTOR_U_COMPRESSION_FACTOR: usize,
+    const VECTOR_V_COMPRESSION_FACTOR: usize,
+    const C1_BLOCK_SIZE: usize,
+    const ETA1: usize,
+    const ETA1_RANDOMNESS_SIZE: usize,
+    const ETA2: usize,
+    const ETA2_RANDOMNESS_SIZE: usize,
+    const IMPLICIT_REJECTION_HASH_INPUT_SIZE: usize,
+    Vector: Operations,
+    Hasher: Hash<K>,
+    Scheme: Variant,
+>(
+    private_key: &MlKemPrivateKey<SECRET_KEY_SIZE>,
+    ciphertext: &MlKemCiphertext<CIPHERTEXT_SIZE>,
+    tag: &[u8], // <-- 新增参数
+) -> MlKemSharedSecret {
+    // --- Step 1: Extract components from private key ---
+    // (Same as standard decapsulate)
+    // Note: The original code used `unpack_private_key`. We assume we have access to parts.
+    // For clarity, let's re-extract them here, though in practice you might reuse the tuple.
+    let (ind_cpa_secret_key, ind_cpa_public_key, ind_cpa_public_key_hash, implicit_rejection_value) =
+        unpack_private_key::<CPA_SECRET_KEY_SIZE, PUBLIC_KEY_SIZE>(&private_key.value);
+
+    // --- Step 2: Decrypt ciphertext to get candidate message m' ---
+    // (Same as standard decapsulate)
+    let decrypted_m_prime = crate::ind_cpa::decrypt::<
+        K,
+        CIPHERTEXT_SIZE,
+        C1_SIZE,
+        VECTOR_U_COMPRESSION_FACTOR,
+        VECTOR_V_COMPRESSION_FACTOR,
+        Vector,
+    >(ind_cpa_secret_key, &ciphertext.value);
+
+    // --- Step 3: Recompute (K'', r'') using m', H(pk), and tag ---
+    // This is the core difference from standard decapsulate
+    let h_pk = ind_cpa_public_key_hash; // Could also re-hash public_key if preferred: Hasher::H(public_key.as_slice())
+
+    // Build to_hash = [ m' || H(pk) || tag ]
+    let mut to_hash_recompute = Vec::with_capacity(SHARED_SECRET_SIZE + H_DIGEST_SIZE + tag.len());
+    to_hash_recompute.extend_from_slice(&decrypted_m_prime);
+    to_hash_recompute.extend_from_slice(h_pk);
+    to_hash_recompute.extend_from_slice(tag); // <-- Key difference: Include tag
+
+    let hashed_recomputed = Hasher::G(&to_hash_recompute); // Assumes G handles variable length
+    let (shared_secret_prime, pseudorandomness_prime) = hashed_recomputed.split_at(SHARED_SECRET_SIZE);
+
+    // --- Step 4: Re-encrypt to get c' ---
+    // (Same structure as standard decapsulate, but uses recomputed values)
+    let expected_ciphertext_bytes = crate::ind_cpa::encrypt::<
+        K,
+        CIPHERTEXT_SIZE,
+        T_AS_NTT_ENCODED_SIZE,
+        C1_SIZE,
+        C2_SIZE,
+        VECTOR_U_COMPRESSION_FACTOR,
+        VECTOR_V_COMPRESSION_FACTOR,
+        C1_BLOCK_SIZE,
+        ETA1,
+        ETA1_RANDOMNESS_SIZE,
+        ETA2,
+        ETA2_RANDOMNESS_SIZE,
+        Vector,
+        Hasher, // Pass hasher type if needed by encrypt
+    >(
+        ind_cpa_public_key, // Use the provided public key
+        &decrypted_m_prime,    // Message to encrypt
+        pseudorandomness_prime, // Randomness influenced by tag
+    );
+
+    // --- Step 5: Prepare shared secrets for selection ---
+    // Success path shared secret
+    let success_shared_secret = Scheme::kdf::<K, CIPHERTEXT_SIZE, Hasher>(
+        shared_secret_prime,
+        ciphertext.as_slice(),
+    );
+
+    // Failure path shared secret (Implicit Rejection)
+    let mut to_hash_failure: [u8; IMPLICIT_REJECTION_HASH_INPUT_SIZE] =
+        into_padded_array(implicit_rejection_value);
+    to_hash_failure[SHARED_SECRET_SIZE..].copy_from_slice(ciphertext.as_ref());
+    let implicit_rejection_seed: [u8; SHARED_SECRET_SIZE] = Hasher::PRF(&to_hash_failure);
+    
+    let failure_shared_secret = Scheme::kdf::<K, CIPHERTEXT_SIZE, Hasher>(
+        &implicit_rejection_seed,
+        ciphertext.as_slice(),
+    );
+
+    // --- Step 6: Constant-time comparison and selection ---
+    // (Same as standard decapsulate)
+    compare_ciphertexts_select_shared_secret_in_constant_time(
+        ciphertext.as_ref(),
+        &expected_ciphertext_bytes,
+        &success_shared_secret,
+        &failure_shared_secret,
     )
 }
 
@@ -991,6 +1166,57 @@ pub(crate) mod unpacked {
         (MlKemCiphertext::from(ciphertext), shared_secret_array)
     }
 
+
+    #[inline(always)]
+    pub(crate) fn encapsulate_with_tag<
+        const K: usize,
+        const CIPHERTEXT_SIZE: usize,
+        const PUBLIC_KEY_SIZE: usize,
+        const T_AS_NTT_ENCODED_SIZE: usize,
+        const C1_SIZE: usize,
+        const C2_SIZE: usize,
+        const VECTOR_U_COMPRESSION_FACTOR: usize,
+        const VECTOR_V_COMPRESSION_FACTOR: usize,
+        const VECTOR_U_BLOCK_LEN: usize,
+        const ETA1: usize,
+        const ETA1_RANDOMNESS_SIZE: usize,
+        const ETA2: usize,
+        const ETA2_RANDOMNESS_SIZE: usize,
+        Vector: Operations,
+        Hasher: Hash<K>,
+    >(
+        public_key: &MlKemPublicKeyUnpacked<K, Vector>,
+        randomness: &[u8; SHARED_SECRET_SIZE],
+        tag: &[u8],
+    ) -> (MlKemCiphertext<CIPHERTEXT_SIZE>, MlKemSharedSecret) {
+        let hashed = encaps_prepare_with_tag::<K, Hasher>(randomness, &public_key.public_key_hash,tag);
+        let (shared_secret, pseudorandomness) = hashed.split_at(SHARED_SECRET_SIZE);
+
+        let ciphertext = ind_cpa::encrypt_unpacked::<
+            K,
+            CIPHERTEXT_SIZE,
+            T_AS_NTT_ENCODED_SIZE,
+            C1_SIZE,
+            C2_SIZE,
+            VECTOR_U_COMPRESSION_FACTOR,
+            VECTOR_V_COMPRESSION_FACTOR,
+            VECTOR_U_BLOCK_LEN,
+            ETA1,
+            ETA1_RANDOMNESS_SIZE,
+            ETA2,
+            ETA2_RANDOMNESS_SIZE,
+            Vector,
+            Hasher,
+        >(
+            &public_key.ind_cpa_public_key,
+            &randomness,
+            pseudorandomness,
+        );
+        let mut shared_secret_array = [0u8; SHARED_SECRET_SIZE];
+        shared_secret_array.copy_from_slice(shared_secret);
+        (MlKemCiphertext::from(ciphertext), shared_secret_array)
+    }
+
     #[hax_lib::requires(randomness.len() == 32 && pk_hash.len() == 32)]
     #[hax_lib::ensures(|result| fstar!("result == Spec.Utils.v_G (concat randomness pk_hash)"))]
     pub(crate) fn encaps_prepare<const K: usize, Hasher: Hash<K>>(
@@ -1007,6 +1233,29 @@ pub(crate) mod unpacked {
             "eq_intro $to_hash (
             concat $randomness $pk_hash)"
         );
+
+        Hasher::G(&to_hash)
+    }
+
+    pub(crate) fn encaps_prepare_with_tag<const K: usize, Hasher: Hash<K>>(
+        randomness: &[u8],
+        pk_hash: &[u8],
+        tag: &[u8],
+    ) -> [u8; 64] {
+        // hax_lib::fstar!(
+        //     "eq_intro (Seq.slice (
+        //     Libcrux_ml_kem.Utils.into_padded_array (sz 64) $randomness) 0 32) $randomness"
+        // );
+        // let mut to_hash: [u8; 2 * H_DIGEST_SIZE] = into_padded_array(randomness);
+        // to_hash[H_DIGEST_SIZE..].copy_from_slice(pk_hash);
+        // hax_lib::fstar!(
+        //     "eq_intro $to_hash (
+        //     concat $randomness $pk_hash)"
+        // );
+        let mut to_hash = Vec::with_capacity(SHARED_SECRET_SIZE + H_DIGEST_SIZE + tag.len());
+        to_hash.extend_from_slice(&randomness);
+        to_hash.extend_from_slice(pk_hash);
+        to_hash.extend_from_slice(tag); 
 
         Hasher::G(&to_hash)
     }
@@ -1087,6 +1336,104 @@ pub(crate) mod unpacked {
         let mut to_hash: [u8; IMPLICIT_REJECTION_HASH_INPUT_SIZE] =
             into_padded_array(&key_pair.private_key.implicit_rejection_value);
         hax_lib::fstar!(
+            "eq_introa
+            (Seq.slice $to_hash 0 32) ${key_pair}.f_private_key.f_implicit_rejection_value"
+        );
+        to_hash[SHARED_SECRET_SIZE..].copy_from_slice(ciphertext.as_ref());
+        hax_lib::fstar!(
+            "lemma_slice_append $to_hash ${key_pair}.f_private_key.f_implicit_rejection_value ${ciphertext}.f_value"
+        );
+        let implicit_rejection_shared_secret: [u8; SHARED_SECRET_SIZE] = Hasher::PRF(&to_hash);
+
+        let expected_ciphertext = ind_cpa::encrypt_unpacked::<
+            K,
+            CIPHERTEXT_SIZE,
+            T_AS_NTT_ENCODED_SIZE,
+            C1_SIZE,
+            C2_SIZE,
+            VECTOR_U_COMPRESSION_FACTOR,
+            VECTOR_V_COMPRESSION_FACTOR,
+            C1_BLOCK_SIZE,
+            ETA1,
+            ETA1_RANDOMNESS_SIZE,
+            ETA2,
+            ETA2_RANDOMNESS_SIZE,
+            Vector,
+            Hasher,
+        >(
+            &key_pair.public_key.ind_cpa_public_key,
+            &decrypted,
+            pseudorandomness,
+        );
+
+        let selector =
+            compare_ciphertexts_in_constant_time(ciphertext.as_ref(), &expected_ciphertext);
+
+        select_shared_secret_in_constant_time(
+            shared_secret,
+            &implicit_rejection_shared_secret,
+            selector,
+        )
+    }
+
+    #[inline(always)]
+    pub(crate) fn decapsulate_with_tag<
+        const K: usize,
+        const SECRET_KEY_SIZE: usize,
+        const CPA_SECRET_KEY_SIZE: usize,
+        const PUBLIC_KEY_SIZE: usize,
+        const CIPHERTEXT_SIZE: usize,
+        const T_AS_NTT_ENCODED_SIZE: usize,
+        const C1_SIZE: usize,
+        const C2_SIZE: usize,
+        const VECTOR_U_COMPRESSION_FACTOR: usize,
+        const VECTOR_V_COMPRESSION_FACTOR: usize,
+        const C1_BLOCK_SIZE: usize,
+        const ETA1: usize,
+        const ETA1_RANDOMNESS_SIZE: usize,
+        const ETA2: usize,
+        const ETA2_RANDOMNESS_SIZE: usize,
+        const IMPLICIT_REJECTION_HASH_INPUT_SIZE: usize,
+        Vector: Operations,
+        Hasher: Hash<K>,
+    >(
+        key_pair: &MlKemKeyPairUnpacked<K, Vector>,
+        ciphertext: &MlKemCiphertext<CIPHERTEXT_SIZE>,
+        tag: &[u8],
+    ) -> MlKemSharedSecret {
+        hax_lib::fstar!(
+            r#"assert (v $IMPLICIT_REJECTION_HASH_INPUT_SIZE == 32 + v (Spec.MLKEM.v_CPA_CIPHERTEXT_SIZE $K));
+        assert (v (Spec.MLKEM.v_C1_SIZE $K +! Spec.MLKEM.v_C2_SIZE $K) == v (Spec.MLKEM.v_C1_SIZE $K) + v (Spec.MLKEM.v_C2_SIZE $K));
+        assert (v (Spec.MLKEM.v_C1_SIZE $K) == v (Spec.MLKEM.v_C1_BLOCK_SIZE $K) * v $K);
+        assert (v (Spec.MLKEM.v_C1_BLOCK_SIZE $K)  == 32 * v (Spec.MLKEM.v_VECTOR_U_COMPRESSION_FACTOR $K));
+        assert (v (Spec.MLKEM.v_C2_SIZE $K) == 32 * v (Spec.MLKEM.v_VECTOR_V_COMPRESSION_FACTOR $K))"#
+        );
+        let decrypted = ind_cpa::decrypt_unpacked::<
+            K,
+            CIPHERTEXT_SIZE,
+            C1_SIZE,
+            VECTOR_U_COMPRESSION_FACTOR,
+            VECTOR_V_COMPRESSION_FACTOR,
+            Vector,
+        >(&key_pair.private_key.ind_cpa_private_key, &ciphertext.value);
+
+        // let mut to_hash: [u8; SHARED_SECRET_SIZE + H_DIGEST_SIZE] = into_padded_array(&decrypted);
+        // hax_lib::fstar!(r#"eq_intro (Seq.slice $to_hash 0 32) $decrypted"#);
+        // to_hash[SHARED_SECRET_SIZE..].copy_from_slice(&key_pair.public_key.public_key_hash);
+        // hax_lib::fstar!(
+        //     r#"lemma_slice_append $to_hash $decrypted ${key_pair}.f_public_key.f_public_key_hash"#
+        // );
+        let mut to_hash = Vec::with_capacity(SHARED_SECRET_SIZE + H_DIGEST_SIZE + tag.len());
+        to_hash.extend_from_slice(&decrypted);
+        to_hash.extend_from_slice(&key_pair.public_key.public_key_hash);
+        to_hash.extend_from_slice(tag); 
+
+        let hashed = Hasher::G(&to_hash);
+        let (shared_secret, pseudorandomness) = hashed.split_at(SHARED_SECRET_SIZE);
+
+        let mut to_hash: [u8; IMPLICIT_REJECTION_HASH_INPUT_SIZE] =
+            into_padded_array(&key_pair.private_key.implicit_rejection_value);
+        hax_lib::fstar!(
             "eq_intro
             (Seq.slice $to_hash 0 32) ${key_pair}.f_private_key.f_implicit_rejection_value"
         );
@@ -1126,4 +1473,5 @@ pub(crate) mod unpacked {
             selector,
         )
     }
+
 }

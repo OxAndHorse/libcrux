@@ -36,7 +36,7 @@ tls_codec = { version = "0.4.2", features = [
 [features]
 # By default all variants and std are enabled.
 default = ["default-no-std", "std"]
-default-no-std = ["mlkem512", "mlkem768", "mlkem1024", "rand"]
+default-no-std = ["mlkem512", "mlkem768", "tkem768", "mlkem1024", "rand"]
 
 # Serialization & Deserialization using tls_codec
 codec = ["dep:tls_codec"]
@@ -51,7 +51,7 @@ simd256 = ["libcrux-sha3/simd256", "libcrux-intrinsics/simd256"]
 mlkem512 = []
 mlkem768 = []
 mlkem1024 = []
-
+tkem768 = []
 # Enable Round 3 Kyber in addition to ML-KEM
 kyber = []
 
